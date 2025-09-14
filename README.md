@@ -59,7 +59,7 @@ pip install -r requirements.txt
 Runs the pipeline end-to-end: split → standardize → run **MyKNN** → plot → run **Scikit-learn KNN** → plot.
 
 ```
-`python run.py --mode grid --csv data/housing.csv --k-grid 1,3,5,7,9,15,25`
+python run.py --mode grid --csv data/housing.csv --k-grid 1,3,5,7,9,15,25
 ```
 
 ### 2. Predict with Both Models
@@ -67,7 +67,7 @@ Runs the pipeline end-to-end: split → standardize → run **MyKNN** → plot �
 Uses the saved training split + scaler to predict from a **feature-only CSV**.
 
 ```
-`python run.py --mode predict --csv data/predictionInputs.csv --k 7`
+python run.py --mode predict --csv data/predictionInputs.csv --k 7
 ```
 
 ---

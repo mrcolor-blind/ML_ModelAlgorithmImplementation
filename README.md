@@ -1,5 +1,5 @@
 # ML Model Algorithm Implementation
-
+Miguel Angel Barrientos A01637150
 ## KNN Regression Model – From Scratch vs Scikit-learn
 
 This repository contains:
@@ -14,6 +14,8 @@ The repo also includes **automation scripts** (`run.py`) to orchestrate the enti
 - Runs **MyKNN** (from scratch), outputs validation results, and saves a validation curve plot.  
 - Runs **Scikit-learn KNN**, outputs validation results, and saves its validation curve plot.  
 - Supports a **predict mode** to generate predictions from a CSV file using both implementations, saving results side-by-side.
+
+3. **Analysis Report** – a report regarding the performance of the KNN model implemented from scratch (in spanish).
 
 ---
 
@@ -50,6 +52,7 @@ pip install -r requirements.txt
    ```
 
 ## How to Run
+**Important:** Make sure you are situated in the **root folder of the repository** before running any command.
 
 ### 1. Train & Validate (Grid Search)
 
@@ -125,3 +128,11 @@ The main script `run.py` accepts the following arguments:
 ---
 
 This repository demonstrates not only how to implement KNN regression **from scratch**, but also how to validate its correctness against a trusted ML library, automate the workflow, and extend it to real prediction tasks.
+
+## Dataset Reference
+
+The dataset used in this project is the **California Housing Prices** dataset, available on Kaggle:  
+
+Nugent, C. (2017). *California housing prices*. Kaggle.  
+[https://www.kaggle.com/datasets/camnugent/california-housing-prices](https://www.kaggle.com/datasets/camnugent/california-housing-prices)
+

@@ -91,7 +91,7 @@ def main():
             "--k-grid", args.k_grid,
             "--seed", str(args.seed)
         ]
-        print("\n[run.py] Running your KNN (grid)...")
+        print("\n[run.py] Running my KNN (grid)...")
         ret = subprocess.call(cmd); 
         if ret != 0: sys.exit(ret)
 

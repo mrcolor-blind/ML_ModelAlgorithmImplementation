@@ -74,77 +74,44 @@ def cross_val_mse(X, y, model_k, cv=5, seed=42):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--splits", type=str, help="Path to standardized splits .npz from run.py")
-    ap.add_argument("--mode", required=True, choices=["fixed", "grid"])
-    ap.add_argument("--k", type=int, help="k for mode=fixed")
+    ap.add_argument("--mode", required=True, choices=["grid", "predict"])
+    ap.add_argument("--k", type=int, help="k for mode=predict")
     ap.add_argument("--k-grid", type=str, help="comma-separated ks for mode=grid (e.g., 1,3,5,7)")
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--cv", type=int, default=5, help="CV folds for curves")
+    ap.add_argument("--cv", type=int, default=5)
+    ap.add_argument("--predict-csv", type=str, help="Feature-only CSV for predictions (predict mode)")
+    # (fallback CSV args can stay if you want, but not needed for predict)
     args = ap.parse_args()
 
-    if args.mode == "fixed" and args.k is None:
-        ap.error("--k is required when --mode fixed")
     if args.mode == "grid" and not args.k_grid:
         ap.error("--k-grid is required when --mode grid")
 
-    # ----- Load data (preferred: splits from run.py)
     if args.splits:
         data = np.load(args.splits, allow_pickle=False)
         X_train = data["X_train"]; y_train = data["y_train"]
         X_val   = data["X_val"];   y_val   = data["y_val"]
         X_test  = data["X_test"];  y_test  = data["y_test"]
+        mu      = data["mu"];      sigma   = data["sigma"]
     else:
-        if not args.csv:
-            ap.error("Provide --splits (preferred) or --csv (fallback).")
-        df = pd.read_csv(args.csv).dropna()
-        target_col = "median_house_value"
-        y = df[target_col].to_numpy(dtype=float)
-        X = df.drop(columns=[target_col]).select_dtypes(include="number").to_numpy(dtype=float)
-        X_train, X_val, X_test, y_train, y_val, y_test = train_val_test_split(
-            X, y, val_size=args.val_size, test_size=args.test_size, random_state=args.seed
-        )
-        mu, sigma = fit_standardizer(X_train)
-        X_train = apply_standardizer(X_train, mu, sigma)
-        X_val   = apply_standardizer(X_val,   mu, sigma)
-        X_test  = apply_standardizer(X_test,  mu, sigma)
+        ap.error("Provide --splits (produced by run.py --mode grid)")
 
-    if args.mode == "fixed":
-        k = int(args.k)
-        model = KNNRegressor(k=k).fit(X_train, y_train)
-        val_pred  = model.predict(X_val)
-        test_pred = model.predict(X_test)
-        print(f"k={k:>2} | val MAE={mae(y_val, val_pred):,.2f}")
-        print("\n[My Model] Fixed-k results")
-        print(f"Test RMSE: {rmse(y_test, test_pred):,.2f}")
-        print(f"Test MAE : {mae(y_test, test_pred):,.2f}")
-        print(f"Test R^2 : {r2(y_test, test_pred):,.4f}")
+    if args.mode == "predict":
+        if args.k is None:
+            ap.error("--k is required for --mode predict")
+        if not args.predict_csv:
+            ap.error("--predict-csv is required for --mode predict")
 
-        # ---- Learning curve on train+val ----
-        X_tv = np.vstack([X_train, X_val])
-        y_tv = np.concatenate([y_train, y_val])
-        train_sizes = np.linspace(0.1, 1.0, 8)
-        tr_mean, tr_std, va_mean, va_std, sizes = [], [], [], [], []
-        for frac in train_sizes:
-            n_sub = int(len(X_tv) * frac)
-            X_sub, y_sub = X_tv[:n_sub], y_tv[:n_sub]
-            m_tr, s_tr, m_va, s_va = cross_val_mse(X_sub, y_sub, model_k=k, cv=args.cv, seed=args.seed)
-            sizes.append(n_sub)
-            tr_mean.append(m_tr); tr_std.append(s_tr)
-            va_mean.append(m_va); va_std.append(s_va)
+        model = KNNRegressor(k=int(args.k)).fit(X_train, y_train)
+        df_pred = pd.read_csv(args.predict_csv)
+        X_new = df_pred.select_dtypes(include="number").to_numpy(dtype=float)
+        X_new_std = (X_new - mu) / sigma
+        y_hat = model.predict(X_new_std)
 
-        plt.figure()
-        plt.plot(sizes, tr_mean, label="Entrenamiento (MyKNN)")
-        plt.fill_between(sizes, np.array(tr_mean)-np.array(tr_std), np.array(tr_mean)+np.array(tr_std), alpha=0.2)
-        plt.plot(sizes, va_mean, label="Validación (MyKNN)")
-        plt.fill_between(sizes, np.array(va_mean)-np.array(va_std), np.array(va_mean)+np.array(va_std), alpha=0.2)
-        plt.xlabel("Tamaño del conjunto de entrenamiento")
-        plt.ylabel("MSE")
-        plt.title(f"Curva de aprendizaje - MyKNN (k={k})")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        out_path = results_dir() / "learningCurve_myKNN_fixedk.png"
-        plt.tight_layout(); plt.savefig(out_path, dpi=150); plt.close()
-        print(f"[My Model] Saved learning curve → {out_path}")
-
+        out = results_dir() / "predictions_myKNN.csv"
+        pd.DataFrame({"prediction": y_hat}).to_csv(out, index=False)
+        print(f"[My Model] Saved predictions → {out}")
+        return
+    
     else:  # grid
         k_grid = parse_grid(args.k_grid)
         best = {"k": None, "mae": float("inf")}

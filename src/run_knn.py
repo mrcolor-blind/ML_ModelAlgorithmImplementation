@@ -2,9 +2,11 @@
 import argparse
 import numpy as np
 import pandas as pd
+from pathlib import Path
+import matplotlib.pyplot as plt
 from .knn import KNNRegressor
 
-# ---------- tiny utilities (still here for back-compat) ----------
+# ---------- tiny utilities ----------
 def train_val_test_split(X, y, val_size=0.15, test_size=0.15, random_state=42):
     rng = np.random.default_rng(random_state)
     n = len(X)
@@ -40,20 +42,43 @@ def r2(y, yhat):
 def parse_grid(grid_str):
     return [int(x) for x in grid_str.split(",") if x.strip()]
 
+def results_dir():
+    d = Path(__file__).resolve().parents[1] / "results"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+# ---------- simple CV helpers ----------
+def kfold_indices(n, k=5, seed=42):
+    rng = np.random.default_rng(seed)
+    idx = np.arange(n)
+    rng.shuffle(idx)
+    folds = np.array_split(idx, k)
+    return folds
+
+def cross_val_mse(X, y, model_k, cv=5, seed=42):
+    folds = kfold_indices(len(X), k=cv, seed=seed)
+    mse_tr, mse_va = [], []
+    for i in range(cv):
+        val_idx = folds[i]
+        train_idx = np.concatenate([folds[j] for j in range(cv) if j != i])
+        Xtr, ytr = X[train_idx], y[train_idx]
+        Xva, yva = X[val_idx], y[val_idx]
+        model = KNNRegressor(k=model_k).fit(Xtr, ytr)
+        yhat_tr = model.predict(Xtr)
+        yhat_va = model.predict(Xva)
+        mse_tr.append(np.mean((ytr - yhat_tr) ** 2))
+        mse_va.append(np.mean((yva - yhat_va) ** 2))
+    return np.mean(mse_tr), np.std(mse_tr), np.mean(mse_va), np.std(mse_va)
+
 # ---------- main pipeline ----------
 def main():
     ap = argparse.ArgumentParser()
-    # Preferred path: receive standardized splits produced by run.py
     ap.add_argument("--splits", type=str, help="Path to standardized splits .npz from run.py")
     ap.add_argument("--mode", required=True, choices=["fixed", "grid"])
     ap.add_argument("--k", type=int, help="k for mode=fixed")
     ap.add_argument("--k-grid", type=str, help="comma-separated ks for mode=grid (e.g., 1,3,5,7)")
     ap.add_argument("--seed", type=int, default=42)
-
-    # Backward-compat path (optional): run directly from CSV like your original script
-    ap.add_argument("--csv", type=str, help="Path to housing.csv (fallback mode)")
-    ap.add_argument("--val-size", type=float, default=0.15)
-    ap.add_argument("--test-size", type=float, default=0.15)
+    ap.add_argument("--cv", type=int, default=5, help="CV folds for curves")
     args = ap.parse_args()
 
     if args.mode == "fixed" and args.k is None:
@@ -82,7 +107,6 @@ def main():
         X_val   = apply_standardizer(X_val,   mu, sigma)
         X_test  = apply_standardizer(X_test,  mu, sigma)
 
-    # ----- Train/validate/test
     if args.mode == "fixed":
         k = int(args.k)
         model = KNNRegressor(k=k).fit(X_train, y_train)
@@ -93,6 +117,33 @@ def main():
         print(f"Test RMSE: {rmse(y_test, test_pred):,.2f}")
         print(f"Test MAE : {mae(y_test, test_pred):,.2f}")
         print(f"Test R^2 : {r2(y_test, test_pred):,.4f}")
+
+        # ---- Learning curve on train+val ----
+        X_tv = np.vstack([X_train, X_val])
+        y_tv = np.concatenate([y_train, y_val])
+        train_sizes = np.linspace(0.1, 1.0, 8)
+        tr_mean, tr_std, va_mean, va_std, sizes = [], [], [], [], []
+        for frac in train_sizes:
+            n_sub = int(len(X_tv) * frac)
+            X_sub, y_sub = X_tv[:n_sub], y_tv[:n_sub]
+            m_tr, s_tr, m_va, s_va = cross_val_mse(X_sub, y_sub, model_k=k, cv=args.cv, seed=args.seed)
+            sizes.append(n_sub)
+            tr_mean.append(m_tr); tr_std.append(s_tr)
+            va_mean.append(m_va); va_std.append(s_va)
+
+        plt.figure()
+        plt.plot(sizes, tr_mean, label="Entrenamiento (MyKNN)")
+        plt.fill_between(sizes, np.array(tr_mean)-np.array(tr_std), np.array(tr_mean)+np.array(tr_std), alpha=0.2)
+        plt.plot(sizes, va_mean, label="Validación (MyKNN)")
+        plt.fill_between(sizes, np.array(va_mean)-np.array(va_std), np.array(va_mean)+np.array(va_std), alpha=0.2)
+        plt.xlabel("Tamaño del conjunto de entrenamiento")
+        plt.ylabel("MSE")
+        plt.title(f"Curva de aprendizaje - MyKNN (k={k})")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        out_path = results_dir() / "learningCurve_myKNN_fixedk.png"
+        plt.tight_layout(); plt.savefig(out_path, dpi=150); plt.close()
+        print(f"[My Model] Saved learning curve → {out_path}")
 
     else:  # grid
         k_grid = parse_grid(args.k_grid)
@@ -112,6 +163,29 @@ def main():
         print(f"Test RMSE: {rmse(y_test, test_pred):,.2f}")
         print(f"Test MAE : {mae(y_test, test_pred):,.2f}")
         print(f"Test R^2 : {r2(y_test, test_pred):,.4f}")
+
+        # ---- Validation curve on train+val ----
+        X_tv = np.vstack([X_train, X_val])
+        y_tv = np.concatenate([y_train, y_val])
+        tr_mean, tr_std, va_mean, va_std = [], [], [], []
+        for k in k_grid:
+            m_tr, s_tr, m_va, s_va = cross_val_mse(X_tv, y_tv, model_k=k, cv=args.cv, seed=args.seed)
+            tr_mean.append(m_tr); tr_std.append(s_tr)
+            va_mean.append(m_va); va_std.append(s_va)
+
+        plt.figure()
+        plt.plot(k_grid, tr_mean, label="Entrenamiento (MyKNN)")
+        plt.fill_between(k_grid, np.array(tr_mean)-np.array(tr_std), np.array(tr_mean)+np.array(tr_std), alpha=0.2)
+        plt.plot(k_grid, va_mean, label="Validación (MyKNN)")
+        plt.fill_between(k_grid, np.array(va_mean)-np.array(va_std), np.array(va_mean)+np.array(va_std), alpha=0.2)
+        plt.xlabel("Número de vecinos (k)")
+        plt.ylabel("MSE")
+        plt.title("Curva de validación - MyKNN")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        out_path = results_dir() / "validationCurve_myKNN_grid.png"
+        plt.tight_layout(); plt.savefig(out_path, dpi=150); plt.close()
+        print(f"[My Model] Saved validation curve → {out_path}")
 
 if __name__ == "__main__":
     main()
